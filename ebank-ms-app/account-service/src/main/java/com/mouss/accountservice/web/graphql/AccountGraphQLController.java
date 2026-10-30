@@ -36,7 +36,7 @@ public class AccountGraphQLController {
         Account account = Account.builder()
                 .customerReference(input.customerReference())
                 .currency(input.currency())
-                .balance(input.balance())
+                .balance(input.balance() == null ? 0 : input.balance())
                 .status(input.status())
                 .build();
         return accountService.create(account);

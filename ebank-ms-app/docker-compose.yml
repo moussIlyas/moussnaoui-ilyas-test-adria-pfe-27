@@ -62,7 +62,7 @@ x-app-healthcheck: &app-healthcheck
 
 services:
   # ------------------------------------------------------------- database --
-  # docker/init-db.sh (docker-entrypoint-initdb.d) creates customer-db,
+  # docker/init-db.sh (docker-entrypoint-initdb.d) creates transactions-db,
   # accounts-db and the app user on the FIRST start of an empty volume.
   # Credentials come from .env - never from the image or this file.
   mariadb:
@@ -90,6 +90,21 @@ services:
     logging: *app-logging
 
   # ------------------------------------------------------------- services --
+  # Spring Cloud Config Server, native backend on the mounted config-repo/.
+  config-service:
+    <<: *app
+    image: ebank-ms/config-service:${IMAGE_TAG:-local}
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        MODULE: .
+        PORT: 8888
+    container_name: ebank-config
+    healthcheck:
+      <<: *app-healthcheck
+      test: ["CMD", "curl", "-fsS", "http://localhost:8888/actuator/health"]
+
   discovery-service:
     <<: *app
     image: ebank-ms/discovery-service:${IMAGE_TAG:-local}
@@ -115,6 +130,8 @@ services:
         PORT: 9999
     container_name: ebank-gateway
     depends_on:
+      config-service:
+        condition: service_healthy
       discovery-service:
         condition: service_healthy
     healthcheck:
@@ -132,6 +149,8 @@ services:
         PORT: 8056
     container_name: ebank-transaction
     depends_on:
+      config-service:
+        condition: service_healthy
       mariadb:
         condition: service_healthy
       discovery-service:
@@ -151,6 +170,8 @@ services:
         PORT: 8057
     container_name: ebank-account
     depends_on:
+      config-service:
+        condition: service_healthy
       mariadb:
         condition: service_healthy
       discovery-service:
@@ -170,6 +191,8 @@ services:
         PORT: 8058
     container_name: ebank-bot
     depends_on:
+      config-service:
+        condition: service_healthy
       discovery-service:
         condition: service_healthy
     healthcheck:

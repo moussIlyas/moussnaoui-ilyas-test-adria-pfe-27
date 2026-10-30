@@ -18,6 +18,11 @@ services:
     ports:
       - "127.0.0.1:3306:3306"
 
+  config-service:
+    <<: *dev-mode
+    ports:
+      - "127.0.0.1:8888:8888"
+
   discovery-service:
     <<: *dev-mode
     ports:

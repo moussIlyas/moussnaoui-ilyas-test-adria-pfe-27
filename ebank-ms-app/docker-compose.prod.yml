@@ -31,6 +31,13 @@ services:
         limits:
           memory: 1g
 
+  config-service:
+    <<: *prod-mode
+    deploy:
+      resources:
+        limits:
+          memory: 512m
+
   discovery-service:
     <<: *prod-mode
     deploy:
