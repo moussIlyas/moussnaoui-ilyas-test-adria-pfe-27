@@ -1,14 +1,51 @@
-#spring:
-#   cloud:
-#       gateway:
-#          server:
-#              webFlux:
-#                  routes:
-#                    - id: r1
-#                      uri: http://localhost:8056
-#                      predicates:
-#                        - Path= /customers/**
-#                    - id: r2
-#                      uri: http://localhost:8057
-#                      predicates:
-#                        - Path= /accounts/**
+# Spring Cloud Gateway routes (single entry point on 9999).
+# /api/accounts/**  -> account-service /accounts/**
+# /api/transactions/** and /api/transfers/** -> transaction-service
+# /api/chat/**      -> ebank-bot /chat
+spring:
+  cloud:
+    gateway:
+      server:
+        webflux:
+          globalcors:
+            cors-configurations:
+              '[/**]':
+                allowedOrigins: "http://localhost:5173"
+                allowedMethods: "*"
+                allowedHeaders: "*"
+                allowCredentials: true
+          routes:
+            - id: account-service
+              uri: lb://account-service
+              predicates:
+                - Path=/api/accounts/**
+              filters:
+                - StripPrefix=1
+
+            - id: transaction-service
+              uri: lb://transaction-service
+              predicates:
+                - Path=/api/transactions/**,/api/transfers/**
+              filters:
+                - StripPrefix=1
+
+            - id: ebank-bot
+              uri: lb://ebank-bot
+              predicates:
+                - Path=/api/chat/**
+              filters:
+                - StripPrefix=1
+
+            - id: account-graphql
+              uri: lb://account-service
+              predicates:
+                - Path=/api/accounts-graphql
+              filters:
+                - SetPath=/graphql
+
+            - id: transaction-graphql
+              uri: lb://transaction-service
+              predicates:
+                - Path=/api/transactions-graphql
+              filters:
+                - SetPath=/graphql

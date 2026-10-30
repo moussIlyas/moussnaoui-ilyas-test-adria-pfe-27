@@ -1,0 +1,35 @@
+type Account {
+    id: ID!
+    customerReference: String!
+    status: AccountStatus!
+    currency: String!
+    balance: Float!
+}
+
+enum AccountStatus {
+    ACTIVE
+    BLOCKED
+}
+
+input CreateAccountInput {
+    customerReference: String!
+    currency: String!
+    balance: Float!
+    status: AccountStatus
+}
+
+input BalanceOperationInput {
+    amount: Float!
+    currency: String!
+}
+
+type Query {
+    accounts: [Account!]!
+    account(id: ID!): Account
+}
+
+type Mutation {
+    createAccount(input: CreateAccountInput!): Account!
+    debitAccount(id: ID!, input: BalanceOperationInput!): Account!
+    creditAccount(id: ID!, input: BalanceOperationInput!): Account!
+}

@@ -28,12 +28,12 @@ services:
     ports:
       - "127.0.0.1:9999:9999"
 
-  customer-service:
+  transaction-service:
     <<: *dev-mode
     ports:
       - "127.0.0.1:8056:8056"
 
-  ebank-service:
+  account-service:
     <<: *dev-mode
     ports:
       - "127.0.0.1:8057:8057"

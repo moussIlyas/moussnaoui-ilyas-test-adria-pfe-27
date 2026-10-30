@@ -47,14 +47,14 @@ services:
         limits:
           memory: 512m
 
-  customer-service:
+  transaction-service:
     <<: *prod-mode
     deploy:
       resources:
         limits:
           memory: 768m
 
-  ebank-service:
+  account-service:
     <<: *prod-mode
     deploy:
       resources:

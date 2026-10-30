@@ -121,16 +121,16 @@ services:
       <<: *app-healthcheck
       test: ["CMD", "curl", "-fsS", "http://localhost:9999/actuator/health"]
 
-  customer-service:
+  transaction-service:
     <<: *app
-    image: ebank-ms/customer-service:${IMAGE_TAG:-local}
+    image: ebank-ms/transaction-service:${IMAGE_TAG:-local}
     build:
       context: .
       dockerfile: Dockerfile
       args:
-        MODULE: customer-service
+        MODULE: transaction-service
         PORT: 8056
-    container_name: ebank-customer
+    container_name: ebank-transaction
     depends_on:
       mariadb:
         condition: service_healthy
@@ -140,16 +140,16 @@ services:
       <<: *app-healthcheck
       test: ["CMD", "curl", "-fsS", "http://localhost:8056/actuator/health"]
 
-  ebank-service:
+  account-service:
     <<: *app
-    image: ebank-ms/ebank-service:${IMAGE_TAG:-local}
+    image: ebank-ms/account-service:${IMAGE_TAG:-local}
     build:
       context: .
       dockerfile: Dockerfile
       args:
-        MODULE: ebank-service
+        MODULE: account-service
         PORT: 8057
-    container_name: ebank-accounts
+    container_name: ebank-account
     depends_on:
       mariadb:
         condition: service_healthy

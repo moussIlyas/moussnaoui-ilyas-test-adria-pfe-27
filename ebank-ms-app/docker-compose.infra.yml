@@ -1,0 +1,126 @@
+# ==============================================================================
+#  INFRA-ONLY stack - MariaDB + Kafka (KRaft) + Keycloak, nothing else.
+#
+#  Use this when the Spring services run from the IDE (or are started later
+#  with docker-compose.yml): it starts only the middleware they need.
+#
+#    docker compose -f docker-compose.infra.yml up -d
+#    docker compose -f docker-compose.infra.yml ps
+#    docker compose -f docker-compose.infra.yml down        # keep data
+#    docker compose -f docker-compose.infra.yml down -v     # wipe data
+#
+#  Published on 127.0.0.1 only:
+#    MariaDB    3306   (root / ${MARIADB_ROOT_PASSWORD}, app user ebank/ebank)
+#    Kafka      29092  (PLAINTEXT, bootstrap for host clients)
+#    Keycloak   8180   -> container 8080 (admin console + OIDC)
+#
+#  Defaults below match .env.example so the file also works standalone.
+#  Override them in .env (compose loads it automatically) or in the shell.
+#
+#  Notes:
+#   - MariaDB reuses docker/init-db.sh (customer-db + accounts-db) on the
+#     first start of an empty volume.
+#   - Keycloak runs with `start-dev` (embedded H2 storage, HTTP only) - fine
+#     for local development, not for production.
+#   - Kafka uses a single combined broker+controller node (KRaft, no ZooKeeper).
+# ==============================================================================
+name: ebank-infra
+
+services:
+  mariadb:
+    image: mariadb:11.8
+    container_name: ebank-infra-mariadb
+    restart: unless-stopped
+    environment:
+      MARIADB_ROOT_PASSWORD: ${MARIADB_ROOT_PASSWORD:-root}
+      DB_USERNAME: ${DB_USERNAME:-ebank}
+      DB_PASSWORD: ${DB_PASSWORD:-ebank}
+      MARIADB_AUTO_UPGRADE: "true"
+      TZ: UTC
+    ports:
+      - "127.0.0.1:3306:3306"
+    volumes:
+      - mariadb-data:/var/lib/mysql
+      - ./docker/init-db.sh:/docker-entrypoint-initdb.d/init-db.sh:ro
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 30s
+    networks:
+      - ebank-infra
+
+  kafka:
+    image: apache/kafka:4.4.0
+    container_name: ebank-infra-kafka
+    hostname: kafka
+    restart: unless-stopped
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      # Host clients use localhost:29092, containers on this network use kafka:19092.
+      KAFKA_LISTENERS: CONTROLLER://:29093,PLAINTEXT_HOST://:29092,PLAINTEXT://:19092
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT_HOST://localhost:29092,PLAINTEXT://kafka:19092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:29093
+      CLUSTER_ID: 4L6g3nShT-eMCtK--X86sw
+      KAFKA_LOG_DIRS: /var/lib/kafka/data
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_SHARE_COORDINATOR_STATE_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_SHARE_COORDINATOR_STATE_TOPIC_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      TZ: UTC
+    ports:
+      - "127.0.0.1:29092:29092"
+    volumes:
+      - kafka-data:/var/lib/kafka/data
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:19092 >/dev/null 2>&1"]
+      interval: 10s
+      timeout: 10s
+      retries: 10
+      start_period: 30s
+    networks:
+      - ebank-infra
+
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.8.1
+    container_name: ebank-infra-keycloak
+    restart: unless-stopped
+    command: ["start-dev", "--http-port=8080"]
+    environment:
+      # Keycloak 26+ names (KEYCLOAK_ADMIN* is the legacy spelling)
+      KC_BOOTSTRAP_ADMIN_USERNAME: ${KEYCLOAK_ADMIN:-admin}
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:-admin}
+      KC_HTTP_ENABLED: "true"
+      KC_HOSTNAME_STRICT: "false"
+      KC_HEALTH_ENABLED: "true"
+      TZ: UTC
+    ports:
+      - "127.0.0.1:8180:8080"
+    volumes:
+      - keycloak-data:/opt/keycloak/data
+    healthcheck:
+      # Management port 9000 is enabled by KC_HEALTH_ENABLED (not published).
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/9000"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 40s
+    networks:
+      - ebank-infra
+
+volumes:
+  mariadb-data:
+  kafka-data:
+  keycloak-data:
+
+networks:
+  ebank-infra:
+    name: ebank-infra

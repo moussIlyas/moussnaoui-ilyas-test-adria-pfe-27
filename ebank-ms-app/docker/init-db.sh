@@ -14,13 +14,13 @@ DB_PASSWORD="${DB_PASSWORD:-ebank}"
 command -v mariadb >/dev/null 2>&1 || { echo "init-db.sh: 'mariadb' client not found" >&2; exit 1; }
 
 mariadb -uroot -p"${MARIADB_ROOT_PASSWORD}" <<SQL
-CREATE DATABASE IF NOT EXISTS \`customer-db\`;
+CREATE DATABASE IF NOT EXISTS \`transactions-db\`;
 CREATE DATABASE IF NOT EXISTS \`accounts-db\`;
 
 CREATE USER IF NOT EXISTS '${DB_USERNAME}'@'%' IDENTIFIED BY '${DB_PASSWORD}';
-GRANT ALL PRIVILEGES ON \`customer-db\`.* TO '${DB_USERNAME}'@'%';
+GRANT ALL PRIVILEGES ON \`transactions-db\`.* TO '${DB_USERNAME}'@'%';
 GRANT ALL PRIVILEGES ON \`accounts-db\`.* TO '${DB_USERNAME}'@'%';
 FLUSH PRIVILEGES;
 SQL
 
-echo "init-db.sh: databases customer-db/accounts-db ready for user '${DB_USERNAME}'"
+echo "init-db.sh: databases transactions-db/accounts-db ready for user '${DB_USERNAME}'"
