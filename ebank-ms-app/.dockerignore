@@ -21,3 +21,7 @@ config-repo
 docker
 docker-compose*.yml
 README.md
+
+# React client (built and run outside the Java images)
+ebank-web/node_modules
+ebank-web/dist

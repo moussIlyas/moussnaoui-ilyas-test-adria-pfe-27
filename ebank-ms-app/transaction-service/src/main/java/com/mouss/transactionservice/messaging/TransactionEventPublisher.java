@@ -5,6 +5,8 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.stereotype.Component;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.util.UUID;
 
@@ -22,9 +24,23 @@ public class TransactionEventPublisher {
     }
 
     /**
-     * Publishes only after the transaction has been persisted. accountId is used as the message key.
+     * Publishes the event only once the surrounding database transaction is committed.
+     * If there is no active transaction, the event is published immediately.
      */
     public void publish(Transaction transaction) {
+        if (TransactionSynchronizationManager.isSynchronizationActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCommit() {
+                    send(transaction);
+                }
+            });
+        } else {
+            send(transaction);
+        }
+    }
+
+    private void send(Transaction transaction) {
         TransactionCreatedEvent event = new TransactionCreatedEvent(
                 UUID.randomUUID(),
                 "TransactionCreated",
@@ -34,6 +50,7 @@ public class TransactionEventPublisher {
                 transaction.getCurrency(),
                 transaction.getCreatedAt());
 
+        // accountId is the message key, so all events of one account keep their order.
         kafkaTemplate.send(TOPIC, transaction.getAccountId().toString(), event)
                 .whenComplete((result, failure) -> {
                     if (failure != null) {

@@ -36,3 +36,7 @@ ebank-bot/src/main/resources/application-local.properties
 
 ### Secrets (never commit) ###
 .env
+
+### React client (ebank-web) ###
+node_modules/
+ebank-web/dist/
