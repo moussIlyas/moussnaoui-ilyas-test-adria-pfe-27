@@ -200,6 +200,11 @@ services:
         condition: service_healthy
       discovery-service:
         condition: service_healthy
+      # MCP clients are initialized at startup, so both tool servers must be ready.
+      account-service:
+        condition: service_healthy
+      transaction-service:
+        condition: service_healthy
     healthcheck:
       <<: *app-healthcheck
       test: ["CMD", "curl", "-fsS", "http://localhost:8058/actuator/health"]
