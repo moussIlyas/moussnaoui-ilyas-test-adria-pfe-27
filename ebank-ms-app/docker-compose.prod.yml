@@ -4,7 +4,8 @@
 #    docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build --wait
 #
 #  - forces SPRING_PROFILES_ACTIVE=pro (config-repo/<service>-pro.properties)
-#  - only the gateway is published: it is the single entry point
+#  - only the web client (80) and the gateway (9999) are published: the web
+#    client is the user entry point, the gateway the API entry point
 #    (Eureka, the services and MariaDB stay on the internal network)
 #  - JVM containers are hardened: read-only root filesystem (+ tmpfs /tmp),
 #    no capabilities, no-new-privileges
@@ -26,6 +27,18 @@ x-prod-mode: &prod-mode
 
 services:
   mariadb:
+    deploy:
+      resources:
+        limits:
+          memory: 1g
+
+  kafka:
+    deploy:
+      resources:
+        limits:
+          memory: 1g
+
+  keycloak:
     deploy:
       resources:
         limits:
@@ -74,3 +87,21 @@ services:
       resources:
         limits:
           memory: 768m
+
+  # Nginx runs unprivileged (port 8080 in the container) so cap_drop/read_only
+  # are safe; only its cache and pid directories are writable (tmpfs).
+  ebank-web:
+    ports:
+      - "80:8080"
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    read_only: true
+    tmpfs:
+      - /var/cache/nginx
+      - /var/run
+    deploy:
+      resources:
+        limits:
+          memory: 128m

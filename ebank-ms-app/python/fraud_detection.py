@@ -66,9 +66,7 @@ NUMERIC_FEATURES = [
     "average_amount_last_7d",
 ]
 
-DEFAULT_DATA = (
-    Path(__file__).resolve().parents[1] / "java" / "bank_transactions.csv"
-)
+DEFAULT_DATA = Path(__file__).resolve().parent / "data" / "bank_transactions.csv"
 DEFAULT_OUTPUT = Path(__file__).resolve().parent / "artifacts"
 
 SEED = 42
@@ -523,7 +521,9 @@ def main() -> None:
 
     print("=" * 70)
     print(f"Résultats enregistrés dans : {args.output_dir}")
-    print("  metrics.json, metrics.csv, model.joblib, 01..05_*.png")
+    print("  metrics.json, metrics.csv, model.joblib, 01..04_*.png")
+    if (args.output_dir / "05_feature_importance.png").is_file():
+        print("  05_feature_importance.png (modèle retenu basé sur des arbres)")
     print("=" * 70)
 
 

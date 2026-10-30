@@ -1,12 +1,15 @@
 # ==============================================================================
-#  Ebank microservices - BASE stack (shared by both modes, safe defaults:
-#  no host ports are published here).
+#  Ebank - COMPLETE stack: MariaDB, Kafka, Keycloak and all Spring services.
+#  Base file = safe defaults (no host ports published).
 #
 #  DEV  (dev profile, every service reachable on 127.0.0.1):
 #    docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build --wait
 #
 #  PROD (pro profile, hardened, only the gateway is published):
 #    docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build --wait
+#
+#  Images can be pulled from a registry instead of built locally:
+#    IMAGE_PREFIX=registry.example.com/ebank IMAGE_TAG=1.2.3 docker compose up -d --no-build
 #
 #  How configuration flows (identical to the IDE layout):
 #    ./config-repo  ->  mounted read-only at /app/config-repo.
@@ -94,11 +97,76 @@ services:
       - ebank
     logging: *app-logging
 
+  # ----------------------------------------------------------------- kafka --
+  # Single KRaft broker (no ZooKeeper). Host clients use localhost:29092,
+  # containers use kafka:19092.
+  kafka:
+    image: apache/kafka:4.4.0
+    container_name: ebank-kafka
+    hostname: kafka
+    restart: unless-stopped
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: CONTROLLER://:29093,PLAINTEXT_HOST://:29092,PLAINTEXT://:19092
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT_HOST://localhost:29092,PLAINTEXT://kafka:19092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:29093
+      CLUSTER_ID: 4L6g3nShT-eMCtK--X86sw
+      KAFKA_LOG_DIRS: /var/lib/kafka/data
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_SHARE_COORDINATOR_STATE_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_SHARE_COORDINATOR_STATE_TOPIC_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      TZ: UTC
+    volumes:
+      - kafka-data:/var/lib/kafka/data
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:19092 >/dev/null 2>&1"]
+      interval: 10s
+      timeout: 10s
+      retries: 10
+      start_period: 30s
+    networks:
+      - ebank
+    logging: *app-logging
+
+  # -------------------------------------------------------------- keycloak --
+  # Started but not wired into the APIs yet; kept for the identity/OIDC part.
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.8.1
+    container_name: ebank-keycloak
+    restart: unless-stopped
+    command: ["start-dev", "--http-port=8080"]
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: ${KEYCLOAK_ADMIN:-admin}
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:-admin}
+      KC_HTTP_ENABLED: "true"
+      KC_HOSTNAME_STRICT: "false"
+      KC_HEALTH_ENABLED: "true"
+      TZ: UTC
+    volumes:
+      - keycloak-data:/opt/keycloak/data
+    healthcheck:
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/9000"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 40s
+    networks:
+      - ebank
+    logging: *app-logging
+
   # ------------------------------------------------------------- services --
   # Spring Cloud Config Server, native backend on the mounted config-repo/.
   config-service:
     <<: *app
-    image: ebank-ms/config-service:${IMAGE_TAG:-local}
+    image: ${IMAGE_PREFIX:-ebank-ms}/config-service:${IMAGE_TAG:-local}
     build:
       context: .
       dockerfile: Dockerfile
@@ -112,7 +180,7 @@ services:
 
   discovery-service:
     <<: *app
-    image: ebank-ms/discovery-service:${IMAGE_TAG:-local}
+    image: ${IMAGE_PREFIX:-ebank-ms}/discovery-service:${IMAGE_TAG:-local}
     build:
       context: .
       dockerfile: Dockerfile
@@ -126,7 +194,7 @@ services:
 
   gateway-service:
     <<: *app
-    image: ebank-ms/gateway-service:${IMAGE_TAG:-local}
+    image: ${IMAGE_PREFIX:-ebank-ms}/gateway-service:${IMAGE_TAG:-local}
     build:
       context: .
       dockerfile: Dockerfile
@@ -145,7 +213,7 @@ services:
 
   transaction-service:
     <<: *app
-    image: ebank-ms/transaction-service:${IMAGE_TAG:-local}
+    image: ${IMAGE_PREFIX:-ebank-ms}/transaction-service:${IMAGE_TAG:-local}
     build:
       context: .
       dockerfile: Dockerfile
@@ -160,13 +228,15 @@ services:
         condition: service_healthy
       discovery-service:
         condition: service_healthy
+      kafka:
+        condition: service_healthy
     healthcheck:
       <<: *app-healthcheck
       test: ["CMD", "curl", "-fsS", "http://localhost:8056/actuator/health"]
 
   account-service:
     <<: *app
-    image: ebank-ms/account-service:${IMAGE_TAG:-local}
+    image: ${IMAGE_PREFIX:-ebank-ms}/account-service:${IMAGE_TAG:-local}
     build:
       context: .
       dockerfile: Dockerfile
@@ -181,13 +251,15 @@ services:
         condition: service_healthy
       discovery-service:
         condition: service_healthy
+      kafka:
+        condition: service_healthy
     healthcheck:
       <<: *app-healthcheck
       test: ["CMD", "curl", "-fsS", "http://localhost:8057/actuator/health"]
 
   ebank-bot:
     <<: *app
-    image: ebank-ms/ebank-bot:${IMAGE_TAG:-local}
+    image: ${IMAGE_PREFIX:-ebank-ms}/ebank-bot:${IMAGE_TAG:-local}
     build:
       context: .
       dockerfile: Dockerfile
@@ -209,8 +281,31 @@ services:
       <<: *app-healthcheck
       test: ["CMD", "curl", "-fsS", "http://localhost:8058/actuator/health"]
 
+  # ------------------------------------------------------------- react web --
+  # Vite build served by Nginx; /api/ is proxied to the gateway (same-origin,
+  # so no CORS). Standalone service: no config-repo mount, no Spring env.
+  ebank-web:
+    image: ${IMAGE_PREFIX:-ebank-ms}/ebank-web:${IMAGE_TAG:-local}
+    build:
+      context: ./ebank-web
+      dockerfile: Dockerfile
+    container_name: ebank-web
+    depends_on:
+      gateway-service:
+        condition: service_healthy
+    healthcheck:
+      <<: *app-healthcheck
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:8080/healthz"]
+    networks:
+      - ebank
+    restart: unless-stopped
+    stop_grace_period: 10s
+    logging: *app-logging
+
 networks:
   ebank:
 
 volumes:
   mariadb-data:
+  kafka-data:
+  keycloak-data:

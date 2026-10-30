@@ -1,20 +1,45 @@
+# =============================================================================
+# Ebank - GitLab CI
+#   detect -> build (compile) -> test -> publish (Docker images) -> deploy
+#
+# Required CI/CD variables:
+#   SSH_PRIVATE_KEY        deploy key for the target server
+#   DB_PASSWORD            MariaDB application password
+#   MARIADB_ROOT_PASSWORD  MariaDB root password
+#   OLLAMA_API_KEY         Ollama cloud key
+#   TAVILY_API_KEY         Tavily key
+#   KEYCLOAK_ADMIN_PASSWORD
+# Optional: ANSIBLE_HOST, APP_REPO_URL (defaults are in ansible/inventory.yaml
+# and ansible/roles/application/defaults/main.yml).
+# =============================================================================
 stages:
-  - run
+  - .pre
+  - build
+  - test
+  - publish
+  - deploy
 
 variables:
-  ANSIBLE_HOST_KEY_CHECKING: "false"
+  MAVEN_OPTS: "-Dmaven.repo.local=$CI_PROJECT_DIR/.m2/repository"
+  MAVEN_IMAGE: "maven:3.9-eclipse-temurin-21"
+  IMAGE_TAG: "$CI_COMMIT_SHORT_SHA"
+
+default:
+  cache:
+    key: "maven-$CI_COMMIT_REF_SLUG"
+    paths:
+      - .m2/repository
+  interruptible: true
 
 # ---------------------------------------------------------------------------
-# Level 1 - change detection.
-# Pushes that touch ONLY ebank-ms-app/config-repo/ -> DEPLOY_MODE=restart
-# (containers restart to re-read config, no image is ever built).
-# Anything else -> DEPLOY_MODE=deploy (normal pipeline behaviour).
+# A push that touches ONLY config-repo/ -> restart containers (no rebuild).
+# Anything else -> normal build/test/publish/deploy.
 # ---------------------------------------------------------------------------
 detect:
   stage: .pre
   image: alpine/git
   variables:
-    GIT_DEPTH: "0"   # full history so the diff against the previous commit is reliable
+    GIT_DEPTH: "0"
   script:
     - |
       BEFORE="$CI_COMMIT_BEFORE_SHA"
@@ -36,18 +61,124 @@ detect:
       printf 'DEPLOY_MODE=%s\n' "$DEPLOY_MODE" > deploy.env
   artifacts:
     reports:
-      env: deploy.env
+      dotenv: deploy.env
 
-run:
-  stage: run
+# ---------------------------------------------------------------------------
+# 1. Compilation - all modules (config-service is the repository root).
+# ---------------------------------------------------------------------------
+build:
+  stage: build
+  image: $MAVEN_IMAGE
+  script:
+    - cd ebank-ms-app
+    - ./mvnw -B -DskipTests package
+    - |
+      for module in discovery-service gateway-service account-service transaction-service ebank-bot; do
+        (cd "$module" && ../mvnw -B -DskipTests package)
+      done
+  artifacts:
+    expire_in: 1 day
+    paths:
+      - ebank-ms-app/target/*.jar
+      - ebank-ms-app/*/target/*.jar
+
+# ---------------------------------------------------------------------------
+# 2. Tests - self-contained: H2 for JPA, no config server, Eureka or Kafka.
+# ---------------------------------------------------------------------------
+test:
+  stage: test
+  image: $MAVEN_IMAGE
+  script:
+    - cd ebank-ms-app
+    - ./mvnw -B test
+    - |
+      for module in discovery-service gateway-service account-service transaction-service ebank-bot; do
+        (cd "$module" && ../mvnw -B test)
+      done
+  artifacts:
+    when: always
+    expire_in: 1 week
+    reports:
+      junit: ebank-ms-app/**/target/surefire-reports/TEST-*.xml
+
+# ---------------------------------------------------------------------------
+# 3. Docker image construction + publication to the GitLab registry.
+#    One shared Dockerfile, parameterised by MODULE + PORT.
+# ---------------------------------------------------------------------------
+publish-images:
+  stage: publish
+  image: docker:27-cli
+  services:
+    - name: docker:27-dind
+      alias: docker
+  variables:
+    DOCKER_HOST: tcp://docker:2375
+    DOCKER_TLS_CERTDIR: ""
+  before_script:
+    - echo "$CI_REGISTRY_PASSWORD" | docker login -u "$CI_REGISTRY_USER" --password-stdin "$CI_REGISTRY"
+  script:
+    - cd ebank-ms-app
+    - |
+      set -eu
+      build_and_push() {
+        service="$1"; module="$2"; port="$3"
+        image="$CI_REGISTRY_IMAGE/$service"
+        echo "Building $image:$IMAGE_TAG (MODULE=$module, PORT=$port)"
+        docker build \
+          --build-arg MODULE="$module" \
+          --build-arg PORT="$port" \
+          -t "$image:$IMAGE_TAG" \
+          -t "$image:latest" .
+        docker push "$image:$IMAGE_TAG"
+        docker push "$image:latest"
+      }
+      build_and_push config-service      .                    8888
+      build_and_push discovery-service   discovery-service    8761
+      build_and_push gateway-service     gateway-service      9999
+      build_and_push transaction-service transaction-service  8056
+      build_and_push account-service     account-service      8057
+      build_and_push ebank-bot           ebank-bot            8058
+      # The React client has its own build context (Vite + Nginx multi-stage)
+      web_image="$CI_REGISTRY_IMAGE/ebank-web"
+      docker build -t "$web_image:$IMAGE_TAG" -t "$web_image:latest" ./ebank-web
+      docker push "$web_image:$IMAGE_TAG"
+      docker push "$web_image:latest"
+  rules:
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
+
+# ---------------------------------------------------------------------------
+# 4. Deployment - Ansible over SSH (Docker Engine + Compose on the server).
+# ---------------------------------------------------------------------------
+deploy:
+  stage: deploy
   image: alpine/ansible
+  needs:
+    - job: publish-images
+    - job: detect
+      artifacts: true
   before_script:
     - ansible --version
-    - cd ansible/
+    - ansible-galaxy collection install community.docker
     - mkdir -p ~/.ssh
     - chmod 700 ~/.ssh
     - printf '%s\n' "$SSH_PRIVATE_KEY" > ~/.ssh/ssh-key-2026-10-16.key
     - chmod 600 ~/.ssh/ssh-key-2026-10-16.key
+    - cd ansible/
   script:
+    - |
+      cat > /tmp/ansible-secrets.yml <<EOF
+      db_password: "${DB_PASSWORD}"
+      mariadb_root_password: "${MARIADB_ROOT_PASSWORD}"
+      ollama_api_key: "${OLLAMA_API_KEY}"
+      tavily_api_key: "${TAVILY_API_KEY}"
+      keycloak_admin_password: "${KEYCLOAK_ADMIN_PASSWORD}"
+      image_prefix: "${CI_REGISTRY_IMAGE}"
+      image_tag: "${CI_COMMIT_SHORT_SHA}"
+      app_repo_url: "${APP_REPO_URL:-https://github.com/moussIlyas/moussnaoui-ilyas-test-adria-pfe-27.git}"
+      EOF
     - ansible-playbook -i inventory.yaml playbook.yaml --syntax-check
-    - ansible-playbook -i inventory.yaml playbook.yaml -e "deploy_mode=${DEPLOY_MODE:-deploy}"
+    - ansible-playbook -i inventory.yaml playbook.yaml -e @/tmp/ansible-secrets.yml -e "deploy_mode=${DEPLOY_MODE:-deploy}"
+  after_script:
+    - rm -f /tmp/ansible-secrets.yml
+  rules:
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
