@@ -1,0 +1,7 @@
+modele,reglage,threshold,accuracy,precision_fraud,recall_fraud,f1_fraud,average_precision,roc_auc,true_negatives,false_positives,false_negatives,true_positives
+logistic_regression,au_seuil_0.5,0.5,0.751,0.1221,0.6275,0.2045,0.1886,0.7234,719,230,19,32
+logistic_regression,au_seuil_choisi_en_CV,0.7765,0.921,0.2083,0.1961,0.202,0.1886,0.7234,911,38,41,10
+decision_tree,au_seuil_0.5,0.5,0.7,0.0751,0.4314,0.1279,0.0917,0.6232,678,271,29,22
+decision_tree,au_seuil_choisi_en_CV,0.7976,0.913,0.14,0.1373,0.1386,0.0917,0.6232,906,43,44,7
+random_forest,au_seuil_0.5,0.5,0.932,0.16,0.0784,0.1053,0.0946,0.6765,928,21,47,4
+random_forest,au_seuil_choisi_en_CV,0.3917,0.894,0.1333,0.1961,0.1587,0.0946,0.6765,884,65,41,10

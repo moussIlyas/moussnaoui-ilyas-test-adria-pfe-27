@@ -4,6 +4,8 @@ import com.mouss.transactionservice.service.AccountServiceUnavailableException;
 import com.mouss.transactionservice.service.TransactionException;
 import feign.FeignException;
 import io.github.resilience4j.circuitbreaker.annotation.CircuitBreaker;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 import java.util.UUID;
@@ -14,6 +16,8 @@ import java.util.UUID;
  */
 @Service
 public class AccountGateway {
+
+    private static final Logger log = LoggerFactory.getLogger(AccountGateway.class);
 
     private final AccountClient accountClient;
 
@@ -49,6 +53,7 @@ public class AccountGateway {
     }
 
     private RuntimeException translate(String action, Throwable throwable) {
+        log.warn("account-service call failed while trying to {}: {}", action, throwable.toString());
         if (throwable instanceof FeignException feignException) {
             if (feignException.status() == 404) {
                 return new TransactionException("Account not found");

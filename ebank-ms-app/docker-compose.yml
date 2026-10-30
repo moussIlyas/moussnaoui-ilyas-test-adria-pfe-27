@@ -41,6 +41,11 @@ x-app: &app
         }
       }
     DB_HOST: mariadb
+    KAFKA_BOOTSTRAP_SERVERS: kafka:19092
+    SPRING_CLOUD_CONFIG_URI: http://config-service:8888
+    # Used only by ebank-bot's MCP client; harmless for the other services.
+    ACCOUNT_SERVICE_URL: http://account-service:8057
+    TRANSACTION_SERVICE_URL: http://transaction-service:8056
     TZ: UTC
   volumes:
     - ./config-repo:/app/config-repo:ro
